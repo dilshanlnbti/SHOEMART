@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import jwt from "jsonwebtoken";
 import cors from "cors";
 import { connectDB } from "./db.js";
+import userRouter from "./routers/userRouter.js";
 
 
 
@@ -33,7 +34,7 @@ app.use((req, res, next) => {
     }
 });
 
-
+app.use("/api/users",userRouter)
 
 
 connectDB();
