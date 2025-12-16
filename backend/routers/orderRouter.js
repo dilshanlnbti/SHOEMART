@@ -5,3 +5,4 @@ import { Accept_Order, Cancel_Order, Complete_Order, Get_Order_Summary, Get_User
 const orderRouter = express.Router();
 
 orderRouter.post("/make_order", Make_Order);
+orderRouter.get("/my_orders", View_My_Orders);

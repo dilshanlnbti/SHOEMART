@@ -208,3 +208,105 @@ export async function Make_Order(req, res) {
     }
   }
 }
+
+export async function View_My_Orders(req, res) {
+  try {
+    // 1) Get user from token
+    const user = req.user;
+    if (!user || !user.userid) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: user not found in token" });
+    }
+
+    const userId = user.userid;
+
+    // 2) Check role (only customers)
+    const customer = await isCustomer(userId);
+    if (!customer) {
+      return res
+        .status(403)
+        .json({ message: "Only customers can view their orders" });
+    }
+
+    // 3) Load orders + items for this user
+    const sql = `
+      SELECT
+        o.order_id,
+        o.user_id,
+        o.customer_name,
+        o.customer_phone,
+        o.customer_address,
+        o.status,
+        o.total,
+        o.description,
+        o.order_date,
+
+        oi.order_item_id,
+        oi.product_id,
+        oi.size_id,
+        oi.product_name,
+        oi.price,
+        oi.quantity,
+        oi.line_total,
+        ps.size_value
+      FROM orders o
+      LEFT JOIN order_items oi
+        ON o.order_id = oi.order_id
+      LEFT JOIN product_sizes ps
+        ON oi.size_id = ps.size_id
+      WHERE o.user_id = ?
+      ORDER BY o.order_date DESC, o.order_id DESC, oi.order_item_id
+    `;
+
+    const [rows] = await pool.query(sql, [userId]);
+
+    if (rows.length === 0) {
+      // No orders for this user
+      return res.status(200).json([]);
+    }
+
+    // 4) Group rows by order_id
+    const ordersMap = new Map();
+
+    for (const row of rows) {
+      if (!ordersMap.has(row.order_id)) {
+        ordersMap.set(row.order_id, {
+          order_id: row.order_id,
+          customer_name: row.customer_name,
+          customer_phone: row.customer_phone,
+          customer_address: row.customer_address,
+          status: row.status,
+          total: row.total,
+          description: row.description,
+          order_date: row.order_date,
+          items: []
+        });
+      }
+
+      if (row.order_item_id) {
+        const order = ordersMap.get(row.order_id);
+        order.items.push({
+          order_item_id: row.order_item_id,
+          product_id: row.product_id,
+          product_name: row.product_name,
+          size_id: row.size_id,
+          size_value: row.size_value,
+          price: row.price,
+          quantity: row.quantity,
+          line_total: row.line_total
+        });
+      }
+    }
+
+    const orders = Array.from(ordersMap.values());
+
+    return res.status(200).json(orders);
+  } catch (error) {
+    console.error("Error fetching my orders:", error.message, error);
+    return res.status(500).json({
+      message: "Error fetching orders",
+      error: error.message
+    });
+  }
+}
