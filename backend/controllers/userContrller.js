@@ -167,3 +167,79 @@ export async function viewUserDetails(req, res) {
 }
 
 // UPDATE USER BY ID (SIMPLE)
+export async function updateUser(req, res) {
+  try {
+    const { userid } = req.params;
+    const { firstname, lastname, username, password } = req.body;
+
+    if (!firstname || !lastname || !username) {
+      return res
+        .status(400)
+        .json({ message: "firstname, lastname, username required" });
+    }
+
+    // 1️⃣ Get current user (to keep old password if no new one)
+    const [rows] = await pool.query(
+      "SELECT password FROM users WHERE userid = ?",
+      [userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    let finalPassword = rows[0].password; // default: keep old hash
+
+    // 2️⃣ If a new password is sent → HASH IT
+    if (password && password.trim() !== "") {
+      finalPassword = await bcrypt.hash(password, 10);
+    }
+
+    // 3️⃣ Update user
+    const sql = `
+      UPDATE users
+      SET firstname = ?, lastname = ?, username = ?, password = ?
+      WHERE userid = ?
+    `;
+
+    const [result] = await pool.query(sql, [
+      firstname,
+      lastname,
+      username,
+      finalPassword,
+      userid,
+    ]);
+
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ message: "User not updated" });
+    }
+
+    res.status(200).json({ message: "Profile updated" });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error updating user" });
+  }
+}
+
+
+export async function Total_Customer_Count(req, res) {
+  try {
+    const [rows] = await pool.query(`
+      SELECT COUNT(*) AS total_customers
+      FROM users
+      WHERE role = 'customer' AND isActive = 'active'
+    `);
+
+    return res.status(200).json({
+      total_customers: rows[0].total_customers
+    });
+
+  } catch (error) {
+    console.error("Error fetching customer count:", error);
+    return res.status(500).json({
+      message: "Error fetching customer count",
+      error: error.message
+    });
+  }
+}
