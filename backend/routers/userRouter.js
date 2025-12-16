@@ -7,6 +7,8 @@ const userRouter = express.Router();
 userRouter.post("/register",Createuser);
 userRouter.post("/login",login);
 userRouter.get("/user/:userid", viewUserDetails);
+userRouter.put("/edit-profile/:userid", updateUser);
+userRouter.get("/count-customers", Total_Customer_Count);
 
 
 
