@@ -5,6 +5,8 @@ import cors from "cors";
 import { connectDB } from "./db.js";
 import userRouter from "./routers/userRouter.js";
 import feedbackRouter from "./routers/feedbackRouter.js";
+import productRouter from "./routers/productRouter.js";
+import orderRouter from "./routers/orderRouter.js";
 
 
 
@@ -36,7 +38,10 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/users",userRouter)
-app.use("/api/feedback", feedbackRouter);
+app.use("/api/feedback", feedbackRouter)
+app.use("/api/orders",orderRouter)
+app.use("/api/products",productRouter)
+
 
 
 connectDB();
