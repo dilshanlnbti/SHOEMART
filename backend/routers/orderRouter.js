@@ -17,5 +17,6 @@ orderRouter.get("/count-total", Total_Order_Count);
 orderRouter.get("/count-processing", Processing_Order_Count);
 orderRouter.get("/recent-four", Recent_Four_Orders);
 orderRouter.get("/user-stats/:user_id", Get_User_Order_Stats);
+orderRouter.get("/orders-summary", Get_Order_Summary);
 
 export default orderRouter;

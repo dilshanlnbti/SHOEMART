@@ -938,5 +938,66 @@ export async function Get_User_Order_Stats(req, res) {
   }
 }
 
+export async function Get_Order_Summary(req, res) {
+  try {
+    const user = req.user;
+
+    if (!user || !user.userid) {
+      return res.status(401).json({ 
+        message: "Unauthorized: user not found in token" 
+      });
+    }
+
+    const [countRows] = await pool.query(`
+      SELECT 
+        SUM(status = 'delivering') AS delivering_count,
+        SUM(status = 'completed') AS completed_count,
+        SUM(status = 'processing') AS processing_count,
+        SUM(status = 'cancelled') AS cancelled_count
+      FROM orders
+    `);
+
+    const [recentRows] = await pool.query(`
+      SELECT 
+        order_id,
+        customer_name,
+        total,
+        status,
+        order_date
+      FROM orders
+      WHERE status IN ('delivering', 'completed')
+      ORDER BY order_date DESC
+      LIMIT 4
+    `);
+
+    const recentOrders = recentRows.map(row => {
+      const parts = row.customer_name?.split(" ") || [];
+      return {
+        order_id: row.order_id,
+        firstname: parts[0] || "",
+        lastname: parts.slice(1).join(" ") || "",
+        total: row.total,
+        status: row.status,
+        order_date: row.order_date
+      };
+    });
+
+    return res.status(200).json({
+      delivering_count: countRows[0].delivering_count || 0,
+      completed_count: countRows[0].completed_count || 0,
+      processing_count: countRows[0].processing_count || 0,
+      cancelled_count: countRows[0].cancelled_count || 0,
+      recent_orders: recentOrders
+    });
+
+  } catch (error) {
+    console.error("Error fetching order summary:", error);
+    return res.status(500).json({
+      message: "Error fetching order summary",
+      error: error.message
+    });
+  }
+}
+
 
 
