@@ -90,3 +90,187 @@ function validateSizesArray(sizes) {
 
   return { valid: true };
 }
+export async function Add_Product(req, res) {
+  let connection;
+
+  try {
+    const {
+      name,
+      altNames,
+      description,
+      main_category,
+      price,
+      color,
+      country,
+      images,
+      isActive,
+      sizes,
+    } = req.body;
+
+    // ===== VALIDATIONS =====
+
+    // Required fields check
+    if (!name || !main_category || price === null || price === undefined) {
+      return res.status(400).json({
+        message: "name, main_category and price are required",
+      });
+    }
+
+    // Validate product name
+    if (!validateProductName(name)) {
+      return res.status(400).json({
+        message: "Product name must be 2-100 characters",
+      });
+    }
+
+    // Validate category
+    if (!ALLOWED_CATEGORIES.includes(main_category)) {
+      return res.status(400).json({
+        message: "Invalid main_category. Allowed: men, women, child",
+      });
+    }
+
+    // Validate price
+    if (!validatePrice(price)) {
+      return res.status(400).json({
+        message: "Price must be a positive number",
+      });
+    }
+
+    // Validate color (optional)
+    if (color && !validateColor(color)) {
+      return res.status(400).json({
+        message: "Color must be 2-30 characters (letters only)",
+      });
+    }
+
+    // Validate country (optional)
+    if (country && !validateCountry(country)) {
+      return res.status(400).json({
+        message: "Country must be 2-50 characters",
+      });
+    }
+
+    // Validate description (optional)
+    if (description && !validateDescription(description)) {
+      return res.status(400).json({
+        message: "Description must be less than 2000 characters",
+      });
+    }
+
+    // Validate altNames (optional)
+    if (altNames && !validateAltNames(altNames)) {
+      return res.status(400).json({
+        message: "AltNames must be less than 500 characters",
+      });
+    }
+
+    // Validate images (optional)
+    if (images && !validateImages(images)) {
+      return res.status(400).json({
+        message: "Images must be an array of valid URLs",
+      });
+    }
+
+    // Validate sizes array
+    const sizesValidation = validateSizesArray(sizes);
+    if (!sizesValidation.valid) {
+      return res.status(400).json({
+        message: sizesValidation.message,
+      });
+    }
+
+    // Validate status
+    let status = isActive || "active";
+    if (!ALLOWED_STATUS.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid isActive. Allowed: active, inactive",
+      });
+    }
+
+    // Check for duplicate product name (optional but recommended)
+    const [existingProduct] = await pool.query(
+      "SELECT product_id FROM products WHERE LOWER(name) = LOWER(?)",
+      [name.trim()]
+    );
+
+    if (existingProduct.length > 0) {
+      return res.status(409).json({
+        message: "Product with this name already exists",
+      });
+    }
+
+    // ===== INSERT PRODUCT =====
+
+    const imagesValue = images ? JSON.stringify(images) : null;
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const insertProductSql = `
+      INSERT INTO products
+        (name, altNames, description, main_category, price,
+         color, country, images, isActive)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const productParams = [
+      name.trim(),
+      altNames ? altNames.trim() : null,
+      description ? description.trim() : null,
+      main_category,
+      Number(price),
+      color ? color.trim() : null,
+      country ? country.trim() : null,
+      imagesValue,
+      status,
+    ];
+
+    const [productResult] = await connection.query(
+      insertProductSql,
+      productParams
+    );
+
+    const productId = productResult.insertId;
+
+    // Insert sizes
+    const insertSizeSql = `
+      INSERT INTO product_sizes (product_id, size_value, stock)
+      VALUES (?, ?, ?)
+    `;
+
+    for (const s of sizes) {
+      await connection.query(insertSizeSql, [
+        productId,
+        s.size_value.trim(),
+        Number(s.stock),
+      ]);
+    }
+
+    await connection.commit();
+
+    return res.status(201).json({
+      message: "Product added successfully",
+      product_id: productId,
+    });
+
+  } catch (error) {
+    console.error("Error adding product:", error);
+
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackErr) {
+        console.error("Rollback failed:", rollbackErr);
+      }
+    }
+
+    return res.status(500).json({
+      message: "Error adding product",
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
