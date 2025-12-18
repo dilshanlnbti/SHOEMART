@@ -274,3 +274,171 @@ export async function Add_Product(req, res) {
     }
   }
 }
+
+
+
+// ==========================
+// VIEW ALL PRODUCTS
+// ==========================
+export async function View_Products(req, res) {
+  try {
+    const sql = `
+      SELECT
+        p.product_id,
+        p.name,
+        p.altNames,
+        p.description,
+        p.main_category,
+        p.price,
+        p.color,
+        p.country,
+        p.images,
+        p.isActive,
+        p.created_at,
+        ps.size_id,
+        ps.size_value,
+        ps.stock
+      FROM products p
+      LEFT JOIN product_sizes ps
+        ON p.product_id = ps.product_id
+      WHERE p.isActive = 'active'
+      ORDER BY p.product_id, ps.size_value
+    `;
+
+    const [rows] = await pool.query(sql);
+
+    const productsMap = new Map();
+
+    for (const row of rows) {
+      if (!productsMap.has(row.product_id)) {
+        let images = null;
+        if (row.images) {
+          try {
+            images = JSON.parse(row.images);
+          } catch (err) {
+            console.error("Error parsing images JSON for product", row.product_id, err.message);
+            images = null;
+          }
+        }
+
+        productsMap.set(row.product_id, {
+          product_id: row.product_id,
+          name: row.name,
+          altNames: row.altNames,
+          description: row.description,
+          main_category: row.main_category,
+          price: row.price,
+          color: row.color,
+          country: row.country,
+          images,
+          isActive: row.isActive,
+          created_at: row.created_at,
+          sizes: []
+        });
+      }
+
+      if (row.size_id) {
+        const product = productsMap.get(row.product_id);
+        product.sizes.push({
+          size_value: row.size_value,
+          stock: row.stock
+        });
+      }
+    }
+
+    const products = Array.from(productsMap.values());
+
+    return res.status(200).json(products);
+
+  } catch (error) {
+    console.error("Error fetching products with sizes:", error);
+    return res.status(500).json({
+      message: "Error fetching products"
+    });
+  }
+}
+
+// ==========================
+// VIEW PRODUCT BY ID
+// ==========================
+export async function View_Product_ById(req, res) {
+  try {
+    const { id } = req.params;
+
+    // Validate product ID
+    if (!validateProductId(id)) {
+      return res.status(400).json({ 
+        message: "Valid Product ID is required (positive integer)" 
+      });
+    }
+
+    const sql = `
+      SELECT
+        p.product_id,
+        p.name,
+        p.altNames,
+        p.description,
+        p.main_category,
+        p.price,
+        p.color,
+        p.country,
+        p.images,
+        p.isActive,
+        p.created_at,
+        ps.size_id,
+        ps.size_value,
+        ps.stock
+      FROM products p
+      LEFT JOIN product_sizes ps
+        ON p.product_id = ps.product_id
+      WHERE p.product_id = ? AND p.isActive = 'active'
+    `;
+
+    const [rows] = await pool.query(sql, [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const first = rows[0];
+
+    let images = [];
+    try {
+      images = JSON.parse(first.images);
+    } catch {
+      images = [];
+    }
+
+    const product = {
+      product_id: first.product_id,
+      name: first.name,
+      altNames: first.altNames,
+      description: first.description,
+      main_category: first.main_category,
+      price: first.price,
+      color: first.color,
+      country: first.country,
+      images,
+      isActive: first.isActive,
+      created_at: first.created_at,
+      sizes: []
+    };
+
+    for (const row of rows) {
+      if (row.size_value) {
+        product.sizes.push({
+          size_value: row.size_value,
+          stock: row.stock
+        });
+      }
+    }
+
+    return res.status(200).json(product);
+
+  } catch (error) {
+    console.error("Error fetching product:", error);
+    return res.status(500).json({
+      message: "Error fetching product"
+    });
+  }
+}
