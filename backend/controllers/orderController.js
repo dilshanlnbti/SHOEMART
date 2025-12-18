@@ -852,5 +852,235 @@ export async function Recent_Four_Orders(req, res) {
   }
 }
 
+export async function Get_User_Order_Stats(req, res) {
+  try {
+    const { user_id } = req.params;
+
+    // Validate user_id
+    if (!user_id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    if (!validateUserId(user_id)) {
+      return res.status(400).json({ 
+        message: "Invalid User ID. Must be a positive integer" 
+      });
+    }
+
+    // Check if user exists
+    const [userCheck] = await pool.query(
+      "SELECT userid FROM users WHERE userid = ?",
+      [user_id]
+    );
+
+    if (userCheck.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const [countRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_orders,
+        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing_orders,
+        SUM(CASE WHEN status = 'delivering' THEN 1 ELSE 0 END) AS delivering_orders,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_orders,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_orders
+      FROM orders
+      WHERE user_id = ?
+      `,
+      [user_id]
+    );
+
+    const [recentRows] = await pool.query(
+      `
+      SELECT 
+        o.order_id,
+        o.total,
+        o.status,
+        o.order_date,
+        u.firstname,
+        u.lastname
+      FROM orders o
+      LEFT JOIN users u ON o.user_id = u.userid
+      WHERE o.user_id = ?
+      ORDER BY o.order_date DESC, o.order_id DESC
+      LIMIT 4
+      `,
+      [user_id]
+    );
+
+    const recent_orders = recentRows.map((r) => ({
+      order_id: r.order_id,
+      total: r.total,
+      status: r.status,
+      order_date: r.order_date,
+      firstname: r.firstname,
+      lastname: r.lastname,
+    }));
+
+    return res.status(200).json({
+      counts: {
+        total_orders: countRows[0].total_orders || 0,
+        processing_orders: countRows[0].processing_orders || 0,
+        delivering_orders: countRows[0].delivering_orders || 0,
+        completed_orders: countRows[0].completed_orders || 0,
+        cancelled_orders: countRows[0].cancelled_orders || 0,
+      },
+      recent_orders,
+    });
+
+  } catch (error) {
+    console.error("Error fetching user order stats:", error);
+    return res.status(500).json({
+      message: "Error fetching user order stats",
+      error: error.message,
+    });
+  }
+}
+
+export async function Get_Order_Summary(req, res) {
+  try {
+    const user = req.user;
+
+    if (!user || !user.userid) {
+      return res.status(401).json({ 
+        message: "Unauthorized: user not found in token" 
+      });
+    }
+
+    const [countRows] = await pool.query(`
+      SELECT 
+        SUM(status = 'delivering') AS delivering_count,
+        SUM(status = 'completed') AS completed_count,
+        SUM(status = 'processing') AS processing_count,
+        SUM(status = 'cancelled') AS cancelled_count
+      FROM orders
+    `);
+
+    const [recentRows] = await pool.query(`
+      SELECT 
+        order_id,
+        customer_name,
+        total,
+        status,
+        order_date
+      FROM orders
+      WHERE status IN ('delivering', 'completed')
+      ORDER BY order_date DESC
+      LIMIT 4
+    `);
+
+    const recentOrders = recentRows.map(row => {
+      const parts = row.customer_name?.split(" ") || [];
+      return {
+        order_id: row.order_id,
+        firstname: parts[0] || "",
+        lastname: parts.slice(1).join(" ") || "",
+        total: row.total,
+        status: row.status,
+        order_date: row.order_date
+      };
+    });
+
+    return res.status(200).json({
+      delivering_count: countRows[0].delivering_count || 0,
+      completed_count: countRows[0].completed_count || 0,
+      processing_count: countRows[0].processing_count || 0,
+      cancelled_count: countRows[0].cancelled_count || 0,
+      recent_orders: recentOrders
+    });
+
+  } catch (error) {
+    console.error("Error fetching order summary:", error);
+    return res.status(500).json({
+      message: "Error fetching order summary",
+      error: error.message
+    });
+  }
+}
+
+export async function View_Completed_Orders(req, res) {
+  try {
+    const user = req.user;
+
+    if (!user || !user.userid) {
+      return res.status(401).json({ 
+        message: "Unauthorized: user not found in token" 
+      });
+    }
+
+    const sql = `
+      SELECT
+        o.order_id,
+        o.user_id,
+        o.customer_name,
+        o.customer_phone,
+        o.customer_address,
+        o.status,
+        o.total,
+        o.order_date,
+        oi.order_item_id,
+        oi.product_id,
+        oi.product_name,
+        oi.price,
+        oi.quantity,
+        oi.line_total,
+        ps.size_value,
+        p.images
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      LEFT JOIN product_sizes ps ON oi.size_id = ps.size_id
+      LEFT JOIN products p ON oi.product_id = p.product_id
+      WHERE o.status = 'completed'
+      ORDER BY o.order_date DESC, o.order_id DESC
+    `;
+
+    const [rows] = await pool.query(sql);
+
+    const map = new Map();
+
+    for (const r of rows) {
+      if (!map.has(r.order_id)) {
+        map.set(r.order_id, {
+          order_id: r.order_id,
+          user_id: r.user_id,
+          customer_name: r.customer_name,
+          customer_phone: r.customer_phone,
+          customer_address: r.customer_address,
+          status: r.status,
+          total: r.total,
+          order_date: r.order_date,
+          items: []
+        });
+      }
+
+      if (r.order_item_id) {
+        let images = [];
+        try {
+          images = r.images ? JSON.parse(r.images) : [];
+        } catch (e) {
+          images = [];
+        }
+
+        map.get(r.order_id).items.push({
+          product_id: r.product_id,
+          product_name: r.product_name,
+          size_value: r.size_value,
+          quantity: r.quantity,
+          price: r.price,
+          line_total: r.line_total,
+          image: images[0] || null
+        });
+      }
+    }
+
+    return res.status(200).json([...map.values()]);
+
+  } catch (err) {
+    console.error("Error loading completed orders:", err);
+    return res.status(500).json({ message: "Error loading completed orders" });
+  }
+}
+
 
 
