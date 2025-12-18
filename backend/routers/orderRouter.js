@@ -14,3 +14,4 @@ orderRouter.put("/complete_order/:order_id", Complete_Order);
 orderRouter.get("/delivry_orders", View_Delivery_Orders);
 orderRouter.put("/cancel_order/:order_id", Cancel_Order);
 orderRouter.get("/count-total", Total_Order_Count);
+orderRouter.get("/count-processing", Processing_Order_Count);

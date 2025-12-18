@@ -781,4 +781,25 @@ export async function Total_Order_Count(req, res) {
   }
 }
 
+export async function Processing_Order_Count(req, res) {
+  try {
+    const [rows] = await pool.query(`
+      SELECT COUNT(*) AS processing_orders
+      FROM orders
+      WHERE status = 'processing'
+    `);
+
+    return res.status(200).json({
+      processing_orders: rows[0].processing_orders
+    });
+
+  } catch (error) {
+    console.error("Error fetching processing order count:", error);
+    return res.status(500).json({
+      message: "Error fetching processing count",
+      error: error.message
+    });
+  }
+}
+
 
