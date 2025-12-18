@@ -1,23 +1,27 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import toast from "react-hot-toast";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
+import toast from "react-hot-toast";
 import { 
     ArrowLeft, 
     Plus, 
     Upload, 
-    Image as ImageIcon, 
     Trash2, 
-    Package,
+    Image as ImageIcon,
     Save,
     X,
     Info,
     Loader2,
-    Sparkles
+    Edit3,
+    Package,
+    AlertTriangle
 } from "lucide-react";
 import mediaUpload from "../utils/mediaUpload";
 
-export default function AddProductPage() {
+export default function EditProduct() {
+    const { state: product } = useLocation();
+    const navigate = useNavigate();
+
     const [name, setName] = useState("");
     const [altNames, setAltNames] = useState("");
     const [description, setDescription] = useState("");
@@ -25,18 +29,34 @@ export default function AddProductPage() {
     const [price, setPrice] = useState("");
     const [color, setColor] = useState("");
     const [country, setCountry] = useState("");
-
-    const [sizes, setSizes] = useState([{ size_value: "", stock: "" }]);
-
     const [images, setImages] = useState([]);
     const [previewImages, setPreviewImages] = useState([]);
-
+    const [existingImages, setExistingImages] = useState([]);
+    const [sizes, setSizes] = useState([{ size_value: "", stock: "" }]);
     const [loading, setLoading] = useState(false);
-    const [aiLoading, setAiLoading] = useState(false);
+    const [isActive, setIsActive] = useState(true);
 
-    const navigate = useNavigate();
+    // Load initial product details
+    useEffect(() => {
+        if (!product) {
+            toast.error("No product selected");
+            navigate("/admin-page/products");
+            return;
+        }
 
-    // Image preview
+        setName(product.name);
+        setAltNames(product.altNames || "");
+        setDescription(product.description || "");
+        setMainCategory(product.main_category);
+        setPrice(product.price);
+        setColor(product.color || "");
+        setCountry(product.country || "");
+        setExistingImages(product.images || []);
+        setSizes(product.sizes?.length > 0 ? product.sizes : [{ size_value: "", stock: "" }]);
+        setIsActive(product.isActive === "active");
+    }, [product]);
+
+    // Preview new uploaded images
     useEffect(() => {
         if (images.length > 0) {
             const previews = Array.from(images).map((file) =>
@@ -48,9 +68,7 @@ export default function AddProductPage() {
     }, [images]);
 
     // Size handlers
-    const addSizeRow = () => {
-        setSizes([...sizes, { size_value: "", stock: "" }]);
-    };
+    const addSizeRow = () => setSizes([...sizes, { size_value: "", stock: "" }]);
 
     const removeSizeRow = (index) => {
         const updated = sizes.filter((_, i) => i !== index);
@@ -63,79 +81,32 @@ export default function AddProductPage() {
         setSizes(updated);
     };
 
-    // Remove single image
-    const removeImage = (index) => {
+    // Remove existing image
+    const removeExistingImage = (index) => {
+        setExistingImages(prev => prev.filter((_, i) => i !== index));
+    };
+
+    // Remove new preview image
+    const removeNewImage = (index) => {
         const newImages = Array.from(images).filter((_, i) => i !== index);
         setImages(newImages);
         setPreviewImages(prev => prev.filter((_, i) => i !== index));
     };
 
-    // AI Content Generation
-    async function generateAIContent() {
-        const token = localStorage.getItem("token");
-        if (!token) return toast.error("Unauthorized");
-
-        if (!name || !mainCategory || !price) {
-            return toast.error("Fill Name, Category, and Price first!");
-        }
-
-        setAiLoading(true);
-
-        try {
-            // Call Node backend (Node -> Flask -> Groq)
-            const [altRes, descRes] = await Promise.all([
-                axios.post(
-                    "http://localhost:3000/api/products/ai-generate_altnames",
-                    {
-                        name,
-                        main_category: mainCategory,
-                        color,
-                        country,
-                    },
-                    { headers: { Authorization: `Bearer ${token}` } }
-                ),
-                axios.post(
-                    "http://localhost:3000/api/products/ai-generate_description",
-                    {
-                        name,
-                        main_category: mainCategory,
-                        price: Number(price),
-                        color,
-                        country,
-                    },
-                    { headers: { Authorization: `Bearer ${token}` } }
-                ),
-            ]);
-
-            setAltNames(altRes.data.altNames || "");
-            setDescription(descRes.data.description || "");
-            toast.success("AI generated altNames & description!");
-        } catch (err) {
-            toast.error(err.response?.data?.message || "AI generation failed");
-            console.error(err);
-        } finally {
-            setAiLoading(false);
-        }
-    }
-
-    // Submit
-    async function handleAddProduct(e) {
+    // Submit Update
+    async function handleUpdateProduct(e) {
         e.preventDefault();
 
         const token = localStorage.getItem("token");
-
-        if (!token) {
-            toast.error("Unauthorized");
-            return;
-        }
+        if (!token) return toast.error("Unauthorized");
 
         if (!name || !mainCategory || !price) {
             toast.error("Name, category, and price are required!");
             return;
         }
 
-        if (!images.length) {
-            toast.error("Upload at least 1 image");
+        if (existingImages.length === 0 && images.length === 0) {
+            toast.error("At least 1 image is required");
             return;
         }
 
@@ -144,13 +115,16 @@ export default function AddProductPage() {
             return;
         }
 
-        setLoading(true);
-
         try {
-            const uploadedUrls = [];
-            for (let file of images) {
-                const url = await mediaUpload(file);
-                uploadedUrls.push(url);
+            setLoading(true);
+
+            // Upload new images if selected
+            let uploaded = [];
+            if (images.length > 0) {
+                for (let f of images) {
+                    const url = await mediaUpload(f);
+                    uploaded.push(url);
+                }
             }
 
             const payload = {
@@ -161,30 +135,33 @@ export default function AddProductPage() {
                 price: Number(price),
                 color,
                 country,
-                images: uploadedUrls,
-                isActive: "active",
+                images: [...existingImages, ...uploaded],
+                isActive: isActive ? "active" : "inactive",
                 sizes: sizes.map((s) => ({
                     size_value: s.size_value,
                     stock: Number(s.stock),
                 })),
             };
 
-            await axios.post(
-                "http://localhost:3000/api/products/add_product",
+            await axios.put(
+                `http://localhost:3000/api/products/update_product/${product.product_id}`,
                 payload,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
-            toast.success("Product added successfully!");
+            toast.success("Product updated successfully!");
             navigate("/admin-page/products");
 
         } catch (err) {
-            toast.error(err.response?.data?.message || "Error adding product");
+            toast.error(err.response?.data?.message || "Update failed");
             console.error(err);
         } finally {
             setLoading(false);
         }
     }
+
+    // Calculate total stock
+    const totalStock = sizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0);
 
     return (
         <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -203,11 +180,13 @@ export default function AddProductPage() {
                         </Link>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-red-600 flex items-center justify-center">
-                                <Plus className="w-5 h-5 text-white" />
+                                <Edit3 className="w-5 h-5 text-white" />
                             </div>
                             <div>
-                                <h1 className="text-xl font-black text-white">ADD PRODUCT</h1>
-                                <p className="text-xs text-gray-500">Create new inventory item</p>
+                                <h1 className="text-xl font-black text-white">EDIT PRODUCT</h1>
+                                <p className="text-xs text-gray-500">
+                                    ID: #{product?.product_id}
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -219,13 +198,13 @@ export default function AddProductPage() {
                             className="h-10 px-4 bg-white/10 hover:bg-white/20 text-white text-sm font-bold flex items-center gap-2 transition-all"
                         >
                             <X className="w-4 h-4" />
-                            <span className="hidden sm:inline">CANCEL</span>
+                            <span className="hidden sm:inline">DISCARD</span>
                         </Link>
                         <button
-                            onClick={handleAddProduct}
-                            disabled={loading || aiLoading}
+                            onClick={handleUpdateProduct}
+                            disabled={loading}
                             className={`h-10 px-6 text-white text-sm font-bold flex items-center gap-2 transition-all ${
-                                loading || aiLoading
+                                loading 
                                     ? "bg-gray-600 cursor-not-allowed" 
                                     : "bg-red-600 hover:bg-red-700"
                             }`}
@@ -238,7 +217,7 @@ export default function AddProductPage() {
                             ) : (
                                 <>
                                     <Save className="w-4 h-4" />
-                                    <span className="hidden sm:inline">SAVE PRODUCT</span>
+                                    <span className="hidden sm:inline">SAVE CHANGES</span>
                                 </>
                             )}
                         </button>
@@ -248,46 +227,52 @@ export default function AddProductPage() {
 
             {/* ============ FORM CONTENT - SCROLLABLE ============ */}
             <div className="flex-1 overflow-y-auto">
-                <form onSubmit={handleAddProduct} className="p-6">
+                <form onSubmit={handleUpdateProduct} className="p-6">
                     <div className="max-w-6xl mx-auto">
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                             {/* ============ LEFT COLUMN - BASIC INFO ============ */}
                             <div className="lg:col-span-2 space-y-6">
 
+                                {/* Product Preview Card */}
+                                <div className="bg-white border-2 border-gray-100 p-4">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-16 h-16 bg-gray-100 flex-shrink-0 overflow-hidden">
+                                            {existingImages.length > 0 ? (
+                                                <img 
+                                                    src={existingImages[0]} 
+                                                    alt={name}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <Package className="w-6 h-6 text-gray-300" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-black text-lg truncate">{name || "Product Name"}</p>
+                                            <div className="flex items-center gap-3 mt-1">
+                                                <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 font-bold uppercase">
+                                                    {mainCategory || "Category"}
+                                                </span>
+                                                <span className="text-sm font-bold text-red-600">
+                                                    Rs. {Number(price || 0).toLocaleString()}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="text-right hidden sm:block">
+                                            <p className="text-xs text-gray-500">Total Stock</p>
+                                            <p className="text-2xl font-black">{totalStock}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* Basic Information */}
                                 <div className="bg-white border-2 border-gray-100">
-                                    <div className="px-6 py-4 border-b-2 border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                    <div className="px-6 py-4 border-b-2 border-gray-100 flex items-center justify-between">
                                         <h2 className="font-black text-sm uppercase tracking-wide">Basic Information</h2>
-                                        
-                                        {/* AI Generate Button */}
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={generateAIContent}
-                                                disabled={aiLoading || loading}
-                                                className={`h-9 px-4 text-xs font-bold flex items-center gap-2 transition-all ${
-                                                    aiLoading || loading
-                                                        ? "bg-gray-400 cursor-not-allowed text-white" 
-                                                        : "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
-                                                }`}
-                                            >
-                                                {aiLoading ? (
-                                                    <>
-                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                        Generating...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Sparkles className="w-3.5 h-3.5" />
-                                                        AI Generate
-                                                    </>
-                                                )}
-                                            </button>
-                                            <span className="text-xs text-gray-400 hidden sm:inline">
-                                                Auto-fill alt names & description
-                                            </span>
-                                        </div>
+                                        <span className="text-xs text-gray-400">* Required fields</span>
                                     </div>
                                     <div className="p-6 space-y-5">
 
@@ -301,8 +286,7 @@ export default function AddProductPage() {
                                                 placeholder="Enter product name"
                                                 value={name}
                                                 onChange={(e) => setName(e.target.value)}
-                                                disabled={loading || aiLoading}
-                                                className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all"
                                             />
                                         </div>
 
@@ -310,17 +294,13 @@ export default function AddProductPage() {
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
                                                 Alternative Names
-                                                {aiLoading && (
-                                                    <span className="ml-2 text-purple-600 animate-pulse">● AI generating...</span>
-                                                )}
                                             </label>
                                             <input
                                                 type="text"
-                                                placeholder="Other names or keywords (or use AI generate)"
+                                                placeholder="Other names or keywords"
                                                 value={altNames}
                                                 onChange={(e) => setAltNames(e.target.value)}
-                                                disabled={loading || aiLoading}
-                                                className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all"
                                             />
                                         </div>
 
@@ -328,17 +308,13 @@ export default function AddProductPage() {
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
                                                 Description
-                                                {aiLoading && (
-                                                    <span className="ml-2 text-purple-600 animate-pulse">● AI generating...</span>
-                                                )}
                                             </label>
                                             <textarea
-                                                placeholder="Enter product description (or use AI generate)"
+                                                placeholder="Enter product description"
                                                 rows={4}
                                                 value={description}
                                                 onChange={(e) => setDescription(e.target.value)}
-                                                disabled={loading || aiLoading}
-                                                className="w-full px-4 py-3 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                className="w-full px-4 py-3 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all resize-none"
                                             />
                                         </div>
 
@@ -351,8 +327,7 @@ export default function AddProductPage() {
                                                 <select
                                                     value={mainCategory}
                                                     onChange={(e) => setMainCategory(e.target.value)}
-                                                    disabled={loading || aiLoading}
-                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold bg-white cursor-pointer transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold bg-white cursor-pointer transition-all"
                                                 >
                                                     <option value="">Select Category</option>
                                                     <option value="men">Men</option>
@@ -370,8 +345,7 @@ export default function AddProductPage() {
                                                     placeholder="0.00"
                                                     value={price}
                                                     onChange={(e) => setPrice(e.target.value)}
-                                                    disabled={loading || aiLoading}
-                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold transition-all"
                                                 />
                                             </div>
                                         </div>
@@ -387,8 +361,7 @@ export default function AddProductPage() {
                                                     placeholder="e.g., Black, White"
                                                     value={color}
                                                     onChange={(e) => setColor(e.target.value)}
-                                                    disabled={loading || aiLoading}
-                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all"
                                                 />
                                             </div>
 
@@ -401,23 +374,8 @@ export default function AddProductPage() {
                                                     placeholder="e.g., Vietnam"
                                                     value={country}
                                                     onChange={(e) => setCountry(e.target.value)}
-                                                    disabled={loading || aiLoading}
-                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                    className="w-full h-12 px-4 border-2 border-gray-200 focus:border-black outline-none font-medium transition-all"
                                                 />
-                                            </div>
-                                        </div>
-
-                                        {/* AI Info Box */}
-                                        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 p-4">
-                                            <div className="flex items-start gap-3">
-                                                <Sparkles className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-                                                <div>
-                                                    <p className="text-sm font-bold text-purple-900">AI-Powered Content</p>
-                                                    <p className="text-xs text-purple-700 mt-1">
-                                                        Fill in Name, Category, and Price, then click "AI Generate" to auto-create 
-                                                        alternative names and product description. You can edit the generated content.
-                                                    </p>
-                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -426,18 +384,18 @@ export default function AddProductPage() {
                                 {/* Sizes & Stock */}
                                 <div className="bg-white border-2 border-gray-100">
                                     <div className="px-6 py-4 border-b-2 border-gray-100 flex items-center justify-between">
-                                        <h2 className="font-black text-sm uppercase tracking-wide">
-                                            Sizes & Stock <span className="text-red-600">*</span>
-                                        </h2>
+                                        <div>
+                                            <h2 className="font-black text-sm uppercase tracking-wide">
+                                                Sizes & Stock <span className="text-red-600">*</span>
+                                            </h2>
+                                            <p className="text-xs text-gray-400 mt-1">
+                                                {sizes.length} size(s) • {totalStock} total units
+                                            </p>
+                                        </div>
                                         <button
                                             type="button"
                                             onClick={addSizeRow}
-                                            disabled={loading || aiLoading}
-                                            className={`h-8 px-3 text-white text-xs font-bold flex items-center gap-1 transition-all ${
-                                                loading || aiLoading
-                                                    ? "bg-gray-400 cursor-not-allowed"
-                                                    : "bg-black hover:bg-red-600"
-                                            }`}
+                                            className="h-8 px-3 bg-black hover:bg-red-600 text-white text-xs font-bold flex items-center gap-1 transition-all"
                                         >
                                             <Plus className="w-3 h-3" />
                                             ADD SIZE
@@ -453,7 +411,9 @@ export default function AddProductPage() {
                                             <div className="col-span-5">
                                                 <span className="text-xs font-bold text-gray-500 uppercase">Stock Qty</span>
                                             </div>
-                                            <div className="col-span-2"></div>
+                                            <div className="col-span-2 text-center">
+                                                <span className="text-xs font-bold text-gray-500 uppercase">Action</span>
+                                            </div>
                                         </div>
 
                                         {/* Size Rows */}
@@ -468,8 +428,7 @@ export default function AddProductPage() {
                                                             onChange={(e) =>
                                                                 updateSizeField(index, "size_value", e.target.value)
                                                             }
-                                                            disabled={loading || aiLoading}
-                                                            className="w-full h-11 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold text-center transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                            className="w-full h-11 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold text-center transition-all"
                                                         />
                                                     </div>
                                                     <div className="col-span-5">
@@ -480,92 +439,159 @@ export default function AddProductPage() {
                                                             onChange={(e) =>
                                                                 updateSizeField(index, "stock", e.target.value)
                                                             }
-                                                            disabled={loading || aiLoading}
-                                                            className="w-full h-11 px-4 border-2 border-gray-200 focus:border-black outline-none font-bold text-center transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                            className={`w-full h-11 px-4 border-2 focus:border-black outline-none font-bold text-center transition-all ${
+                                                                Number(row.stock) === 0 
+                                                                    ? "border-red-300 bg-red-50" 
+                                                                    : Number(row.stock) <= 5 
+                                                                        ? "border-yellow-300 bg-yellow-50"
+                                                                        : "border-gray-200"
+                                                            }`}
                                                         />
                                                     </div>
                                                     <div className="col-span-2 flex justify-center">
-                                                        {sizes.length > 1 && (
+                                                        {sizes.length > 1 ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeSizeRow(index)}
-                                                                disabled={loading || aiLoading}
-                                                                className={`w-11 h-11 flex items-center justify-center transition-all ${
-                                                                    loading || aiLoading
-                                                                        ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-                                                                        : "bg-gray-100 hover:bg-red-600 hover:text-white text-gray-500"
-                                                                }`}
+                                                                className="w-11 h-11 bg-gray-100 hover:bg-red-600 hover:text-white text-gray-500 flex items-center justify-center transition-all"
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
                                                             </button>
+                                                        ) : (
+                                                            <div className="w-11 h-11"></div>
                                                         )}
                                                     </div>
                                                 </div>
                                             ))}
                                         </div>
 
-                                        {/* Info */}
-                                        <div className="mt-4 pt-4 border-t border-gray-100">
-                                            <p className="text-xs text-gray-500 flex items-center gap-2">
-                                                <Info className="w-4 h-4" />
-                                                Add all available sizes with their stock quantities
-                                            </p>
-                                        </div>
+                                        {/* Low Stock Warning */}
+                                        {sizes.some(s => Number(s.stock) <= 5 && Number(s.stock) > 0) && (
+                                            <div className="mt-4 p-3 bg-yellow-50 border-2 border-yellow-200 flex items-center gap-3">
+                                                <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+                                                <p className="text-xs font-bold text-yellow-700">
+                                                    Some sizes have low stock. Consider restocking soon.
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
 
-                            {/* ============ RIGHT COLUMN - IMAGES ============ */}
+                            {/* ============ RIGHT COLUMN - IMAGES & STATUS ============ */}
                             <div className="space-y-6">
 
-                                {/* Image Upload */}
+                                {/* Product Status */}
+                                <div className="bg-white border-2 border-gray-100">
+                                    <div className="px-6 py-4 border-b-2 border-gray-100">
+                                        <h2 className="font-black text-sm uppercase tracking-wide">Product Status</h2>
+                                    </div>
+                                    <div className="p-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <span className={`w-3 h-3 rounded-full ${isActive ? "bg-green-500" : "bg-gray-400"}`}></span>
+                                                <span className="font-bold">{isActive ? "Active" : "Inactive"}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsActive(!isActive)}
+                                                className={`relative w-12 h-6 transition-all ${
+                                                    isActive ? "bg-green-500" : "bg-gray-300"
+                                                }`}
+                                            >
+                                                <span className={`absolute top-1 w-4 h-4 bg-white transition-all ${
+                                                    isActive ? "right-1" : "left-1"
+                                                }`}></span>
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-3">
+                                            {isActive 
+                                                ? "Product is visible to customers" 
+                                                : "Product is hidden from store"
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Existing Images */}
+                                <div className="bg-white border-2 border-gray-100">
+                                    <div className="px-6 py-4 border-b-2 border-gray-100 flex items-center justify-between">
+                                        <h2 className="font-black text-sm uppercase tracking-wide">
+                                            Current Images
+                                        </h2>
+                                        <span className="text-xs font-bold text-gray-400">
+                                            {existingImages.length} image(s)
+                                        </span>
+                                    </div>
+                                    <div className="p-6">
+                                        {existingImages.length > 0 ? (
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {existingImages.map((img, idx) => (
+                                                    <div key={idx} className="relative group">
+                                                        <div className="aspect-square bg-gray-100 overflow-hidden">
+                                                            <img
+                                                                src={img}
+                                                                alt={`Product ${idx + 1}`}
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeExistingImage(idx)}
+                                                            className="absolute top-2 right-2 w-6 h-6 bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </button>
+                                                        {idx === 0 && (
+                                                            <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-white text-xs font-bold py-1 text-center">
+                                                                MAIN
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="p-4 bg-red-50 border-2 border-red-200 text-center">
+                                                <AlertTriangle className="w-6 h-6 text-red-500 mx-auto mb-2" />
+                                                <p className="text-xs font-bold text-red-600">No images! Add at least one.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Upload New Images */}
                                 <div className="bg-white border-2 border-gray-100">
                                     <div className="px-6 py-4 border-b-2 border-gray-100">
                                         <h2 className="font-black text-sm uppercase tracking-wide">
-                                            Product Images <span className="text-red-600">*</span>
+                                            Add New Images
                                         </h2>
                                     </div>
                                     <div className="p-6">
                                         
                                         {/* Upload Area */}
-                                        <label className={`block ${loading || aiLoading ? 'cursor-not-allowed' : 'cursor-pointer'} group`}>
-                                            <div className={`border-2 border-dashed p-8 text-center transition-all ${
-                                                loading || aiLoading 
-                                                    ? 'border-gray-200 bg-gray-50' 
-                                                    : 'border-gray-300 group-hover:border-red-600'
-                                            }`}>
-                                                <div className={`w-16 h-16 flex items-center justify-center mx-auto mb-4 transition-all ${
-                                                    loading || aiLoading
-                                                        ? 'bg-gray-100'
-                                                        : 'bg-gray-100 group-hover:bg-red-50'
-                                                }`}>
-                                                    <Upload className={`w-8 h-8 transition-all ${
-                                                        loading || aiLoading
-                                                            ? 'text-gray-300'
-                                                            : 'text-gray-400 group-hover:text-red-600'
-                                                    }`} />
+                                        <label className="block cursor-pointer group">
+                                            <div className="border-2 border-dashed border-gray-300 group-hover:border-red-600 p-6 text-center transition-all">
+                                                <div className="w-12 h-12 bg-gray-100 group-hover:bg-red-50 flex items-center justify-center mx-auto mb-3 transition-all">
+                                                    <Upload className="w-6 h-6 text-gray-400 group-hover:text-red-600 transition-all" />
                                                 </div>
-                                                <p className={`font-bold text-sm mb-1 ${loading || aiLoading ? 'text-gray-400' : ''}`}>
-                                                    Click to upload
-                                                </p>
-                                                <p className="text-xs text-gray-500">PNG, JPG up to 5MB each</p>
+                                                <p className="font-bold text-sm mb-1">Click to upload</p>
+                                                <p className="text-xs text-gray-500">PNG, JPG up to 5MB</p>
                                             </div>
                                             <input
                                                 type="file"
                                                 multiple
                                                 accept="image/*"
                                                 className="hidden"
-                                                disabled={loading || aiLoading}
                                                 onChange={(e) => setImages(e.target.files)}
                                             />
                                         </label>
 
-                                        {/* Preview Images */}
+                                        {/* Preview New Images */}
                                         {previewImages.length > 0 && (
-                                            <div className="mt-6">
+                                            <div className="mt-4">
                                                 <div className="flex items-center justify-between mb-3">
                                                     <span className="text-xs font-bold text-gray-500 uppercase">
-                                                        Uploaded ({previewImages.length})
+                                                        New ({previewImages.length})
                                                     </span>
                                                     <button
                                                         type="button"
@@ -573,96 +599,58 @@ export default function AddProductPage() {
                                                             setImages([]);
                                                             setPreviewImages([]);
                                                         }}
-                                                        disabled={loading || aiLoading}
-                                                        className={`text-xs font-bold ${
-                                                            loading || aiLoading
-                                                                ? 'text-gray-400 cursor-not-allowed'
-                                                                : 'text-red-600 hover:text-red-700'
-                                                        }`}
+                                                        className="text-xs font-bold text-red-600 hover:text-red-700"
                                                     >
-                                                        Clear All
+                                                        Clear
                                                     </button>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     {previewImages.map((src, idx) => (
                                                         <div key={idx} className="relative group">
-                                                            <div className="aspect-square bg-gray-100 overflow-hidden">
+                                                            <div className="aspect-square bg-gray-100 overflow-hidden border-2 border-green-500">
                                                                 <img
                                                                     src={src}
-                                                                    alt={`Preview ${idx + 1}`}
+                                                                    alt={`New ${idx + 1}`}
                                                                     className="w-full h-full object-cover"
                                                                 />
                                                             </div>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => removeImage(idx)}
-                                                                disabled={loading || aiLoading}
-                                                                className={`absolute top-2 right-2 w-6 h-6 flex items-center justify-center transition-all ${
-                                                                    loading || aiLoading
-                                                                        ? 'bg-gray-400 text-white opacity-50 cursor-not-allowed'
-                                                                        : 'bg-red-600 text-white opacity-0 group-hover:opacity-100'
-                                                                }`}
+                                                                onClick={() => removeNewImage(idx)}
+                                                                className="absolute top-2 right-2 w-6 h-6 bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
-                                                            {idx === 0 && (
-                                                                <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-white text-xs font-bold py-1 text-center">
-                                                                    MAIN
-                                                                </div>
-                                                            )}
+                                                            <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs font-bold py-1 text-center">
+                                                                NEW
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </div>
                                         )}
-
-                                        {/* No Images */}
-                                        {previewImages.length === 0 && (
-                                            <div className="mt-4 p-4 bg-gray-50 text-center">
-                                                <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                                                <p className="text-xs text-gray-500">No images uploaded</p>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
 
-                                {/* Quick Tips */}
-                                <div className="bg-black text-white p-6">
-                                    <h3 className="font-black text-sm mb-4">QUICK TIPS</h3>
-                                    <ul className="space-y-3 text-sm text-gray-400">
-                                        <li className="flex items-start gap-2">
-                                            <span className="w-1.5 h-1.5 bg-red-600 mt-1.5 flex-shrink-0"></span>
-                                            Use high-quality product images
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="w-1.5 h-1.5 bg-red-600 mt-1.5 flex-shrink-0"></span>
-                                            First image will be the main display
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="w-1.5 h-1.5 bg-red-600 mt-1.5 flex-shrink-0"></span>
-                                            Add accurate stock for each size
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="w-1.5 h-1.5 bg-red-600 mt-1.5 flex-shrink-0"></span>
-                                            Set competitive pricing
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="w-1.5 h-1.5 bg-purple-500 mt-1.5 flex-shrink-0"></span>
-                                            <span className="text-purple-400">Use AI to generate descriptions</span>
-                                        </li>
-                                    </ul>
-                                </div>
-
-                                {/* Status Preview */}
-                                <div className="bg-white border-2 border-gray-100 p-6">
-                                    <h3 className="font-black text-sm uppercase tracking-wide mb-4">Status</h3>
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-3 h-3 bg-green-500 rounded-full"></span>
-                                        <span className="font-bold text-sm">Active</span>
+                                {/* Danger Zone */}
+                                <div className="bg-white border-2 border-red-200">
+                                    <div className="px-6 py-4 border-b-2 border-red-200 bg-red-50">
+                                        <h2 className="font-black text-sm uppercase tracking-wide text-red-600">
+                                            Danger Zone
+                                        </h2>
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        Product will be visible to customers after saving
-                                    </p>
+                                    <div className="p-6">
+                                        <p className="text-xs text-gray-600 mb-4">
+                                            Permanently delete this product and all its data. This action cannot be undone.
+                                        </p>
+                                        <button
+                                            type="button"
+                                            className="w-full h-10 bg-white border-2 border-red-600 text-red-600 hover:bg-red-600 hover:text-white text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                            DELETE PRODUCT
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -674,13 +662,13 @@ export default function AddProductPage() {
                                 className="flex-1 h-12 bg-gray-100 hover:bg-gray-200 text-black font-bold flex items-center justify-center gap-2 transition-all"
                             >
                                 <X className="w-4 h-4" />
-                                CANCEL
+                                DISCARD
                             </Link>
                             <button
                                 type="submit"
-                                disabled={loading || aiLoading}
+                                disabled={loading}
                                 className={`flex-1 h-12 text-white font-bold flex items-center justify-center gap-2 transition-all ${
-                                    loading || aiLoading
+                                    loading 
                                         ? "bg-gray-400 cursor-not-allowed" 
                                         : "bg-red-600 hover:bg-red-700"
                                 }`}
@@ -693,7 +681,7 @@ export default function AddProductPage() {
                                 ) : (
                                     <>
                                         <Save className="w-4 h-4" />
-                                        SAVE PRODUCT
+                                        SAVE CHANGES
                                     </>
                                 )}
                             </button>
