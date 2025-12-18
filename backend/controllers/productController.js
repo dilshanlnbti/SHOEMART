@@ -849,3 +849,30 @@ export async function Increase_Product_Views(req, res) {
   }
 }
 
+export async function Get_Top_Viewed_Products(req, res) {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT product_id, name, price, images, views 
+      FROM products
+      WHERE isActive = 'active'
+      ORDER BY views DESC
+      LIMIT 8
+      `
+    );
+
+    const products = rows.map(p => ({
+      ...p,
+      images: p.images ? JSON.parse(p.images) : []
+    }));
+
+    return res.status(200).json(products);
+
+  } catch (error) {
+    console.error("Error fetching top viewed products:", error);
+    return res.status(500).json({
+      message: "Failed to load top viewed products",
+      error: error.message
+    });
+  }
+}
