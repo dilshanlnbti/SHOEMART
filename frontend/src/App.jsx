@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 import Home from './pages/home';
+import AdminPage from './admin/adminpage';
 
 
 
@@ -21,6 +22,7 @@ function App() {
           <Route path="/client-page/*" element={<ClientPage />} />
           <Route path="/login" element={<Login  />} />
           <Route path="/register" element={<Register  />} />
+          <Route path="/admin-page/*" element={<AdminPage />} />
           
         </Routes>
       </Router>
