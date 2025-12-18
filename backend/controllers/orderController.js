@@ -524,3 +524,77 @@ export async function Accept_Order(req, res) {
     if (connection) connection.release();
   }
 }
+
+export async function Complete_Order(req, res) {
+  let connection;
+
+  try {
+    // 1) Check token
+    const user = req.user;
+
+    if (!user || !user.userid) {
+      return res.status(401).json({
+        message: "Unauthorized: user not found in token"
+      });
+    }
+
+    const userId = user.userid;
+
+    // 2) Check role: only delivery staff can complete orders
+    const deliveryPerson = await isDelivery(userId);
+    if (!deliveryPerson) {
+      return res.status(403).json({
+        message: "Only delivery staff can complete orders"
+      });
+    }
+
+    // 3) Get order ID
+    const { order_id } = req.params;
+
+    if (!order_id) {
+      return res.status(400).json({
+        message: "Order ID is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+
+    // 4) Check order exists and get current status
+    const [rows] = await connection.query(
+      "SELECT status FROM orders WHERE order_id = ?",
+      [order_id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Order not found"
+      });
+    }
+
+    const currentStatus = rows[0].status;
+
+    if (currentStatus !== "delivering") {
+      return res.status(400).json({
+        message: "Only orders in 'delivering' status can be completed"
+      });
+    }
+
+    // 5) Update order status to completed
+    await connection.query(
+      "UPDATE orders SET status = 'completed' WHERE order_id = ?",
+      [order_id]
+    );
+
+    return res.status(200).json({
+      message: "Order completed successfully."
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error completing order",
+      error: error.message
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+}
