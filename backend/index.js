@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import cors from "cors";
 import { connectDB } from "./db.js";
 import userRouter from "./routers/userRouter.js";
+import orderRouter from "./routers/orderRouter.js";
+import productRouter from "./routers/productRouter.js";
 
 
 
@@ -35,6 +37,8 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/users",userRouter)
+app.use("/api/orders",orderRouter)
+app.use("/api/products",productRouter)
 
 
 connectDB();

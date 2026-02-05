@@ -10,4 +10,4 @@ productRouter.put("/update_product/:id", Update_Product_Details);
 productRouter.delete("/delete_product/:id", Delete_Product);
 
 
-export default productRouter;
+export default productRouter;
