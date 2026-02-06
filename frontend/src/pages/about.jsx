@@ -41,7 +41,7 @@ export default function About() {
                 <div className="max-w-7xl mx-auto px-6">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
                         <div className="text-center text-white">
-                            <p className="text-5xl font-black">10K+</p>
+                            <p className="text-5xl font-black">100K+</p>
                             <p className="text-sm font-medium mt-2 text-white/80">Happy Customers</p>
                         </div>
                         <div className="text-center text-white">
